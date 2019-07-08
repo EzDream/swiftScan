@@ -30,6 +30,19 @@ public struct  LBXScanResult {
     }
 }
 
+extension LBXScanWrapper :AVCaptureVideoDataOutputSampleBufferDelegate {
+    private func imageFromSampleBuffer(sampleBuffer: CMSampleBuffer) -> UIImage? {
+        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+        guard let cgImage = CIContext().createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+    public func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        capturedImage = imageFromSampleBuffer(sampleBuffer: sampleBuffer)
+    }
+}
+
+
 
 
 open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
@@ -40,7 +53,7 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     
     let session = AVCaptureSession()
     var previewLayer:AVCaptureVideoPreviewLayer?
-    var stillImageOutput:AVCaptureStillImageOutput?
+//    var stillImageOutput:AVCaptureStillImageOutput?
     
     //存储返回结果
     var arrayResult:[LBXScanResult] = [];
@@ -53,6 +66,8 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     
     //当前扫码结果是否处理
     var isNeedScanResult:Bool = true
+    
+    var capturedImage:UIImage?
     
     /**
      初始化设备
@@ -78,8 +93,9 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
         output = AVCaptureMetadataOutput()
         
         isNeedCaptureImage = isCaptureImg
-        
-        stillImageOutput = AVCaptureStillImageOutput();
+
+
+        let videoOutput = AVCaptureVideoDataOutput()
         
         super.init()
         
@@ -95,12 +111,20 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
             session.addOutput(output)
         }
         
-        if session.canAddOutput(stillImageOutput!) {
-            session.addOutput(stillImageOutput!)
+        if session.canAddOutput(videoOutput) {
+            session.addOutput(videoOutput)
+            videoOutput.connection(with: .video)?.videoOrientation = .portrait
+            videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as AnyHashable as! String: kCVPixelFormatType_32BGRA]
+            let queue = DispatchQueue(label: "cameraQueue")
+            videoOutput.setSampleBufferDelegate(self, queue: queue)
         }
         
-        let outputSettings:Dictionary = [AVVideoCodecJPEG:AVVideoCodecKey]
-        stillImageOutput?.outputSettings = outputSettings
+//        if session.canAddOutput(stillImageOutput!) {
+//            session.addOutput(stillImageOutput!)
+//        }
+        
+//        let outputSettings:Dictionary = [AVVideoCodecJPEG:AVVideoCodecKey]
+//        stillImageOutput?.outputSettings = outputSettings
         
         session.sessionPreset = AVCaptureSession.Preset.high
         
@@ -220,27 +244,10 @@ open class LBXScanWrapper: NSObject,AVCaptureMetadataOutputObjectsDelegate {
     //MARK: ----拍照
     open func captureImage()
     {
-        let stillImageConnection:AVCaptureConnection? = connectionWithMediaType(mediaType: AVMediaType.video as AVMediaType, connections: (stillImageOutput?.connections)! as [AnyObject])
-        
-        
-        stillImageOutput?.captureStillImageAsynchronously(from: stillImageConnection!, completionHandler: { (imageDataSampleBuffer, error) -> Void in
-            
-            self.stop()
-            if imageDataSampleBuffer != nil
-            {
-                let imageData: Data = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(imageDataSampleBuffer!)!
-                let scanImg:UIImage? = UIImage(data: imageData)
-                
-                
-                for idx in 0...self.arrayResult.count-1
-                {
-                    self.arrayResult[idx].imgScanned = scanImg
-                }
-            }
-            
-            self.successBlock(self.arrayResult)
-            
-        })
+        for idx in 0...self.arrayResult.count-1 {
+            self.arrayResult[idx].imgScanned = capturedImage
+        }
+        self.successBlock(self.arrayResult)
     }
     
     open func connectionWithMediaType(mediaType:AVMediaType, connections:[AnyObject]) -> AVCaptureConnection?
